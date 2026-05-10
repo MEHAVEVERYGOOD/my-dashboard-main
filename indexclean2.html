@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grease-Care</title>
+    
+    <!-- Icons (Thin Outlined Style) -->
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0" rel="stylesheet" />
+    
+    <!-- Scripts -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    
+    <style>
+        :root { 
+            --bg: #f5f5f7; 
+            --card-bg: rgba(255, 255, 255, 0.7);
+            --text-main: #1d1d1f; 
+            --text-sub: #86868b; 
+            --border: rgba(0, 0, 0, 0.05); 
+            
+            /* Muted Apple-like colors */
+            --accent: #0071e3; 
+            --danger: #ff3b30; 
+            --warning: #f59e0b; 
+            --success: #34c759; 
+            --info: #5ac8fa;
+            
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+            --blur: blur(20px);
+        }
+        
+        [data-theme="dark"] { 
+            --bg: #000000; 
+            --card-bg: #1c1c1e; 
+            --text-main: #f5f5f7; 
+            --text-sub: #86868b; 
+            --border: rgba(255, 255, 255, 0.1); 
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+            --card-bg: rgba(28, 28, 30, 0.7);
+        }
+
+        body { 
+            /* Apple System Fonts */
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; 
+            background: var(--bg); margin: 0; 
+            display: flex; height: 100vh; color: var(--text-main); transition: 0.4s ease; 
+            letter-spacing: -0.01em;
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        /* Sidebar */
+        .sidebar { 
+            width: 220px; 
+            padding: 32px 24px; display: flex; flex-direction: column; transition: 0.3s;
+        }
+        .logo { 
+            color: var(--text-main); font-weight: 600; font-size: 18px; margin-bottom: 40px; 
+            display: flex; align-items: center; gap: 10px; letter-spacing: -0.02em;
+        }
+        
+        .status-box { 
+            margin-bottom: 40px; padding: 12px 16px; border-radius: 16px; 
+            background: var(--card-bg); border: 1px solid var(--border);
+            backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+        }
+        .status-indicator { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; }
+        .online { background: var(--success); }
+        .offline { background: var(--danger); }
+        
+        .menu-item { 
+            padding: 10px 14px; border-radius: 12px; color: var(--text-sub); 
+            text-decoration: none; margin-bottom: 6px; cursor: pointer; 
+            display: flex; align-items: center; gap: 12px; font-weight: 500; font-size: 14px; transition: 0.2s ease;
+        }
+        .menu-item:hover { color: var(--text-main); background: rgba(0,0,0,0.03); }
+        [data-theme="dark"] .menu-item:hover { background: rgba(255,255,255,0.05); }
+        .menu-item.active { background: var(--text-main); color: var(--bg); }
+        [data-theme="dark"] .menu-item.active { background: var(--text-main); color: var(--bg); }
+        
+        /* Main Content */
+        .main-content { flex: 1; padding: 40px 60px; overflow-y: auto; }
+        .tab-content { display: none; animation: fade 0.4s ease; } 
+        .tab-content.active { display: block; }
+        
+        @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+        
+        h1 { font-size: 32px; font-weight: 600; margin: 0 0 32px 0; letter-spacing: -0.03em; }
+        
+        /* Grid & Cards */
+        .dashboard-grid { 
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 20px; margin-bottom: 32px; 
+        }
+        .card { 
+            background: var(--card-bg); padding: 24px; border-radius: 24px; 
+            border: 1px solid var(--border); box-shadow: var(--shadow); 
+            backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+        }
+        
+        .stat-card { display: flex; flex-direction: column; gap: 16px; }
+        .icon-box { 
+            width: 40px; height: 40px; display: flex; 
+            align-items: center; justify-content: flex-start; color: var(--text-sub);
+        }
+        .icon-box span { font-size: 28px; }
+        
+        .stat-info { display: flex; flex-direction: column; gap: 4px; }
+        .stat-label { font-size: 13px; color: var(--text-sub); font-weight: 500; }
+        .val-big { font-size: 28px; font-weight: 500; color: var(--text-main); letter-spacing: -0.02em; }
+        
+        /* Progress Bar (Pill style) */
+        .progress-container { width: 100%; background: var(--border); border-radius: 999px; height: 6px; margin-top: 12px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--text-main); width: 0%; transition: 0.6s cubic-bezier(0.25, 1, 0.5, 1); border-radius: 999px; }
+        
+        /* Buttons */
+        .btn-group { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+        .btn-row { display: flex; gap: 12px; }
+        .btn { 
+            padding: 14px 20px; border: none; border-radius: 999px; cursor: pointer; 
+            font-weight: 500; font-size: 14px; transition: 0.2s ease; display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1;
+        }
+        
+        .btn-primary { background: var(--text-main); color: var(--bg); }
+        .btn-primary:hover:not(:disabled) { transform: scale(0.98); opacity: 0.9; }
+        
+        .btn-secondary { background: rgba(0,0,0,0.05); color: var(--text-main); }
+        [data-theme="dark"] .btn-secondary { background: rgba(255,255,255,0.1); }
+        .btn-secondary:hover:not(:disabled) { background: rgba(0,0,0,0.1); }
+        [data-theme="dark"] .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
+        
+        .btn-danger-active { background: var(--danger); color: white; }
+        
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        
+        /* Table */
+        table { width: 100%; border-collapse: collapse; font-size: 14px; } 
+        th { text-align: left; padding: 12px 0; color: var(--text-sub); font-weight: 500; border-bottom: 1px solid var(--border); }
+        td { padding: 16px 0; border-bottom: 1px solid var(--border); color: var(--text-main); font-weight: 400; }
+        tr:last-child td { border-bottom: none; }
+        
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.1); transition: .3s; border-radius: 24px; }
+        [data-theme="dark"] .slider { background: rgba(255,255,255,0.1); }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 2px; bottom: 2px; background: white; transition: .3s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        input:checked + .slider { background: var(--success); }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        .section-title { margin: 0 0 20px 0; font-size: 16px; font-weight: 500; color: var(--text-main); }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="logo">
+            <span class="material-symbols-outlined">bubble_chart</span>
+            Grease-Care
+        </div>
+        
+        <div class="status-box">
+            <div class="status-indicator">
+                <span id="board-dot" class="status-dot offline"></span>
+                <span id="board-text" style="font-size: 13px; font-weight: 500;">Offline</span>
+            </div>
+            <div id="last-seen" style="font-size: 11px; color: var(--text-sub); margin-top: 2px;">Last sync: --</div>
+        </div>
+
+        <nav>
+            <div class="menu-item active" onclick="showTab('overview', this)">
+                <span class="material-symbols-outlined" style="font-size: 20px;">grid_view</span> Overview
+            </div>
+            <div class="menu-item" onclick="showTab('history', this)">
+                <span class="material-symbols-outlined" style="font-size: 20px;">receipt_long</span> Activity
+            </div>
+            <div class="menu-item" onclick="showTab('settings', this)">
+                <span class="material-symbols-outlined" style="font-size: 20px;">tune</span> Settings
+            </div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <section id="overview" class="tab-content active">
+            <h1>Overview</h1>
+            
+            <div class="dashboard-grid">
+                <div class="card stat-card">
+                    <div class="icon-box"><span class="material-symbols-outlined">device_thermostat</span></div>
+                    <div class="stat-info"><span class="stat-label">Main Temp</span><span class="val-big" id="temp-val">-- °C</span></div>
+                </div>
+                <div class="card stat-card">
+                    <div class="icon-box"><span class="material-symbols-outlined">thermometer</span></div>
+                    <div class="stat-info"><span class="stat-label">Storage Temp</span><span class="val-big" id="temp2-val">-- °C</span></div>
+                </div>
+                <div class="card stat-card">
+                    <div class="icon-box"><span class="material-symbols-outlined" id="status-icon">air</span></div>
+                    <div class="stat-info"><span class="stat-label">Trap Status</span><span class="val-big" id="status-text">Air</span></div>
+                </div>
+                <div class="card stat-card">
+                    <div class="icon-box"><span class="material-symbols-outlined">opacity</span></div>
+                    <div class="stat-info" style="width: 100%;">
+                        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                            <span class="stat-label">Storage Level</span><span class="val-big" id="tank-val" style="font-size: 18px;">0%</span>
+                        </div>
+                        <div class="progress-container"><div class="progress-bar" id="tank-bar"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+                <div class="card" style="height: 360px; display:flex; flex-direction:column;">
+                    <h3 class="section-title">Thermal Analytics</h3>
+                    <div style="flex:1; position:relative; width:100%;">
+                        <canvas id="tempChart"></canvas>
+                    </div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 24px;">
+                    <div class="card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 class="section-title" style="margin:0;">Main Pump</h3>
+                            <span id="pump-badge" style="font-size: 12px; color: var(--text-sub);">Standby</span>
+                        </div>
+                        <div class="btn-row">
+                            <button id="on-btn" class="btn btn-primary" onclick="sendCmd('1')" disabled>Start</button>
+                            <button id="off-btn" class="btn btn-secondary" onclick="sendCmd('0')" disabled>Stop</button>
+                        </div>
+                        <div id="lock-notice" style="color: var(--danger); font-size: 12px; margin-top: 16px; font-weight: 400; text-align: center;"></div>
+                    </div>
+
+                    <div class="card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 class="section-title" style="margin:0;">Mixer</h3>
+                            <span id="motor-badge" style="font-size: 12px; color: var(--text-sub);">Standby</span>
+                        </div>
+                        <div class="btn-group" style="margin-top:0;">
+                            <div class="btn-row">
+                                <button id="motor-on-btn" class="btn btn-secondary" onclick="sendMotorCmd('1')">Spin</button>
+                                <button id="motor-off-btn" class="btn btn-secondary" onclick="sendMotorCmd('0')" disabled>Stop</button>
+                            </div>
+                            <button id="mix-pump-btn" class="btn btn-secondary" onclick="sendMixPumpCmd()">
+                                Add Grease (5s)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="history" class="tab-content">
+            <h1>Activity Log</h1>
+            <div class="card" style="padding: 24px 40px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Event</th>
+                            <th>Temp (Main / Storage)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="settings" class="tab-content">
+            <h1>Settings</h1>
+            <div class="card" style="max-width: 400px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: 500;">Appearance</span>
+                        <span style="font-size: 13px; color: var(--text-sub);">Toggle dark mode</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="theme-toggle" onclick="toggleTheme()">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Configuration
+        const firebaseConfig = { apiKey: "AIzaSyDFqx54O85izHkvdeff0WRsEhQX-B601Ag", databaseURL: "https://grease-trap2-default-rtdb.asia-southeast1.firebasedatabase.app" }; 
+        const TANK_HEIGHT_CM = 10.4; 
+
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt'); 
+        
+        let currentTemp = 0, currentTemp2 = 0;
+        let greaseCode = 0, pumpState = false, lastPumpState = -1;
+        let tankDistance = 10.4, motorState = false, mixPumpState = false;
+        let lastSeenTimestamp = 0; 
+
+        // Minimalist Chart.js Setup
+        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif';
+        Chart.defaults.color = '#86868b';
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        
+        const tempLabels = [], tempData = [], temp2Data = [];
+        
+        const tempChart = new Chart(tempCtx, { 
+            type: 'line', 
+            data: { 
+                labels: tempLabels, 
+                datasets: [
+                    { 
+                        label: 'Main', data: tempData, 
+                        borderColor: '#1d1d1f', // Will update dynamically in theme toggle
+                        borderWidth: 2, pointRadius: 0,
+                        tension: 0.4, fill: false
+                    },
+                    { 
+                        label: 'Storage', data: temp2Data, 
+                        borderColor: '#86868b', 
+                        borderWidth: 2, pointRadius: 0,
+                        tension: 0.4, fill: false 
+                    }
+                ] 
+            }, 
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                interaction: { mode: 'index', intersect: false },
+                plugins: { 
+                    legend: { position: 'top', align: 'end', labels: { boxWidth: 8, usePointStyle: true } },
+                    tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', cornerRadius: 10, padding: 12 }
+                },
+                scales: { 
+                    x: { display: false }, 
+                    y: { 
+                        min: 0, max: 80, 
+                        border: { display: false },
+                        grid: { color: 'rgba(0,0,0,0)', drawBorder: false } // Hidden grid lines
+                    } 
+                } 
+            } 
+        });
+
+        client.on('connect', () => { 
+            const topics = ['temp', 'temp2', 'grease_status', 'pump_real_status', 'tank_distance', 'motor_status', 'mix_pump_status', 'board_status'];
+            topics.forEach(t => client.subscribe(`myiot/${t}`));
+        });
+
+        client.on('message', (topic, message) => {
+            const data = message.toString();
+            lastSeenTimestamp = Date.now();
+
+            if (topic === 'myiot/board_status') { updateBoardConnectionUI(data); }
+            if (topic === 'myiot/temp') { currentTemp = data; document.getElementById('temp-val').innerText = data + "°"; updateChartData(); }
+            if (topic === 'myiot/temp2') {
+                currentTemp2 = data; document.getElementById('temp2-val').innerText = data + "°";
+                if (temp2Data.length > 0) { temp2Data[temp2Data.length - 1] = currentTemp2; tempChart.update(); }
+            }
+            if (topic === 'myiot/grease_status') { greaseCode = parseInt(data); updateUI(); }
+            if (topic === 'myiot/tank_distance') { tankDistance = parseFloat(data); updateUI(); }
+            if (topic === 'myiot/pump_real_status') { 
+                pumpState = (data === "1"); updateUI(); 
+                if(pumpState !== lastPumpState) { 
+                    database.ref('logs').push({ time: new Date().toLocaleString('th-TH'), event: pumpState ? "Pump Started" : "Pump Stopped", temp: currentTemp, temp2: currentTemp2 }); 
+                    lastPumpState = pumpState; 
+                } 
+            }
+            if (topic === 'myiot/motor_status') { motorState = (data === "1"); updateMixerUI(); }
+            if (topic === 'myiot/mix_pump_status') { mixPumpState = (data === "1"); updateMixerUI(); }
+        });
+
+        function updateChartData() {
+            if (tempLabels.length > 20) { tempLabels.shift(); tempData.shift(); temp2Data.shift(); } 
+            tempLabels.push(new Date().toLocaleTimeString()); 
+            tempData.push(currentTemp); temp2Data.push(currentTemp2);
+            tempChart.update(); 
+        }
+
+        function updateBoardConnectionUI(status) {
+            const dot = document.getElementById('board-dot'), text = document.getElementById('board-text');
+            if (status === 'online') { dot.className = "status-dot online"; text.innerText = "Online"; } 
+            else { dot.className = "status-dot offline"; text.innerText = "Offline"; }
+        }
+
+        setInterval(() => {
+            if (lastSeenTimestamp === 0) return; 
+            const diffSeconds = Math.floor((Date.now() - lastSeenTimestamp) / 1000);
+            document.getElementById('last-seen').innerText = `Sync: ${diffSeconds}s ago`;
+            if (diffSeconds > 15) { updateBoardConnectionUI('offline'); } else { updateBoardConnectionUI('online'); }
+        }, 2000);
+
+        function updateUI() {
+            let tankPercent = ((TANK_HEIGHT_CM - tankDistance) / TANK_HEIGHT_CM) * 100;
+            tankPercent = Math.max(0, Math.min(100, tankPercent)); 
+            document.getElementById('tank-val').innerText = Math.round(tankPercent) + "%";
+            
+            const tankBar = document.getElementById('tank-bar');
+            tankBar.style.width = tankPercent + "%";
+            let isTankFull = (tankPercent > 90); 
+            
+            if (isTankFull) { tankBar.style.backgroundColor = "var(--danger)"; }
+            else if (tankPercent > 70) { tankBar.style.backgroundColor = "var(--warning)"; }
+            else { tankBar.style.backgroundColor = "var(--text-main)"; }
+
+            const onBtn = document.getElementById('on-btn'), offBtn = document.getElementById('off-btn');
+            const statusText = document.getElementById('status-text'), statusIcon = document.getElementById('status-icon');
+            const notice = document.getElementById('lock-notice'), pumpBadge = document.getElementById('pump-badge');
+            
+            onBtn.disabled = !(greaseCode === 1 && !pumpState && !isTankFull);
+            offBtn.disabled = !pumpState;
+            
+            if(pumpState) { 
+                offBtn.classList.add('btn-danger-active'); offBtn.classList.remove('btn-secondary'); 
+                pumpBadge.innerText = "Active"; pumpBadge.style.color = "var(--success)";
+            } else { 
+                offBtn.classList.remove('btn-danger-active'); offBtn.classList.add('btn-secondary');
+                pumpBadge.innerText = "Standby"; pumpBadge.style.color = "var(--text-sub)";
+            }
+            
+            notice.style.display = "block";
+            if (pumpState) { notice.style.display = "none"; }
+            else if (isTankFull) { notice.innerText = 'Storage Full'; }
+            else if (greaseCode === 0) { statusText.innerText = "Air"; statusIcon.innerText = "air"; notice.innerText = 'Waiting for grease'; notice.style.color = "var(--text-sub)"; } 
+            else if (greaseCode === 1) { statusText.innerText = "Grease Ready"; statusIcon.innerText = "water_drop"; notice.style.display = "none"; } 
+            else if (greaseCode === 2) { statusText.innerText = "Water Detected"; statusIcon.innerText = "water"; notice.innerText = 'Locked: Water'; notice.style.color = "var(--warning)"; }
+        }
+
+        function updateMixerUI() {
+            const mOnBtn = document.getElementById('motor-on-btn'), mOffBtn = document.getElementById('motor-off-btn'), mBadge = document.getElementById('motor-badge');
+            mOnBtn.disabled = motorState; mOffBtn.disabled = !motorState;
+            
+            if (motorState) { 
+                mOffBtn.classList.add('btn-danger-active'); mOffBtn.classList.remove('btn-secondary'); 
+                mBadge.innerText = "Spinning"; mBadge.style.color = "var(--success)";
+            } else { 
+                mOffBtn.classList.remove('btn-danger-active'); mOffBtn.classList.add('btn-secondary'); 
+                mBadge.innerText = "Standby"; mBadge.style.color = "var(--text-sub)";
+            }
+            
+            const mixBtn = document.getElementById('mix-pump-btn');
+            if (mixPumpState) { mixBtn.innerText = 'Processing...'; mixBtn.disabled = true; mixBtn.style.opacity = "0.5"; } 
+            else { mixBtn.innerText = 'Add Grease (5s)'; mixBtn.disabled = false; mixBtn.style.opacity = "1"; }
+        }
+
+        database.ref('logs').limitToLast(10).on('value', snap => { 
+            let html = ""; const d = snap.val(); 
+            if(d) Object.keys(d).reverse().forEach(k => {
+                html += `<tr>
+                    <td style="color: var(--text-sub);">${d[k].time.split(' ')[1]}</td>
+                    <td>${d[k].event}</td>
+                    <td>${d[k].temp}° / ${d[k].temp2 || '--'}°</td>
+                </tr>`;
+            }); 
+            document.getElementById('history-body').innerHTML = html; 
+        });
+
+        function showTab(id, el) { 
+            document.querySelectorAll('.tsssab-content').forEach(t => t.classList.remove('active')); 
+            document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active')); 
+            document.getElementById(id).classList.add('active'); el.classList.add('active'); 
+        }
+
+        function toggleTheme() { 
+            const isDark = document.getElementById('theme-toggle').checked;
+            document.body.setAttribute('data-theme', isDark ? 'dark' : 'light'); 
+            
+            // Dynamic chart color update for Apple aesthetic
+            tempChart.data.datasets[0].borderColor = isDark ? '#f5f5f7' : '#1d1d1f';
+            tempChart.update();
+        }
+        
+        function sendCmd(v) { client.publish('myiot/control', v); }
+        function sendMotorCmd(v) { client.publish('myiot/control_motor', v); }
+        function sendMixPumpCmd() { client.publish('myiot/control_mix_pump', '1'); }
+    </script>
+</body>
+</html>

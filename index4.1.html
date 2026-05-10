@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grease-Care: Smart Dashboard</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        :root { 
+            --primary: #6f42c1; --bg: #f8f9fd; --card-bg: #ffffff; 
+            --text-main: #333; --text-sub: #888; --border: #eee; 
+            --danger: #ff5252; --warning: #ffc107; --success: #28a745; 
+        }
+        [data-theme="dark"] { --bg: #121212; --card-bg: #1e1e1e; --text-main: #e0e0e0; --text-sub: #aaa; --border: #333; }
+        
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            background: var(--bg); margin: 0; display: flex; height: 100vh; 
+            color: var(--text-main); transition: 0.3s; overflow: hidden;
+        }
+
+        /* Sidebar / Bottom Nav */
+        .sidebar { 
+            width: 200px; background: var(--card-bg); border-right: 1px solid var(--border); 
+            padding: 20px; display: flex; flex-direction: column; z-index: 1000;
+        }
+        .logo { color: var(--primary); font-weight: bold; font-size: 20px; margin-bottom: 30px; }
+        .menu-item { 
+            padding: 12px 15px; border-radius: 8px; color: var(--text-sub); 
+            text-decoration: none; margin-bottom: 5px; cursor: pointer; font-size: 14px;
+        }
+        .menu-item.active { background: var(--primary); color: white; }
+
+        /* Main Content */
+        .main-content { 
+            flex: 1; padding: 20px; overflow-y: auto; 
+            box-sizing: border-box;
+        }
+        .tab-content { display: none; max-width: 900px; margin: 0 auto; } 
+        .tab-content.active { display: block; }
+
+        /* Dashboard Grid */
+        .dashboard-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); 
+            grid-gap: 12px; margin-bottom: 15px; 
+        }
+        
+        .card { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .stat-label { font-size: 11px; color: var(--text-sub); text-transform: uppercase; display: block; margin-top: 5px; }
+        .val-big { font-size: 20px; font-weight: bold; }
+        
+        /* Layout Grid */
+        .visual-grid { display: grid; grid-template-columns: 1.5fr 1fr; grid-gap: 15px; }
+
+        .btn-group { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .btn { padding: 14px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .btn-on { background: var(--primary); color: white; }
+        .btn-off { background: #eee; color: #555; } .btn-off.active { background: var(--danger); color: white; }
+
+        .progress-container { width: 100%; background: #eee; border-radius: 5px; height: 8px; margin-top: 8px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--success); width: 0%; transition: 0.5s; }
+
+        /* Responsive Mobile */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .sidebar { 
+                flex-direction: row; width: 100%; height: 60px; border-right: none; 
+                border-top: 1px solid var(--border); position: fixed; bottom: 0; left: 0;
+                padding: 0; justify-content: space-around; 
+            }
+            .logo { display: none; }
+            .menu-item { 
+                margin: 0; padding: 15px 10px; border-radius: 0; flex: 1; text-align: center;
+                display: flex; align-items: center; justify-content: center; font-size: 12px;
+            }
+            .menu-item.active { background: none; color: var(--primary); border-top: 3px solid var(--primary); }
+            
+            .main-content { 
+                padding: 15px; 
+                padding-bottom: 120px; /* เพิ่มพื้นที่กันเมนูทับปุ่ม */
+            }
+            .visual-grid { grid-template-columns: 1fr; }
+        }
+
+        table { width: 100%; border-collapse: collapse; } 
+        th, td { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .table-wrapper { overflow-x: auto; }
+        
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background: var(--primary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">Grease-Care</div>
+        <div class="menu-item active" onclick="showTab('overview', this)">Overview</div>
+        <div class="menu-item" onclick="showTab('history', this)">History</div>
+        <div class="menu-item" onclick="showTab('settings', this)">Settings</div>
+    </div>
+
+    <div class="main-content">
+        <div id="overview" class="tab-content active">
+            <h2 style="margin-top:0;">Overview</h2>
+            <div class="dashboard-grid">
+                <div class="card">
+                    <span class="val-big" id="temp-val">-- °C</span>
+                    <span class="stat-label">Temperature</span>
+                </div>
+                <div class="card">
+                    <span class="val-big" id="status-text">Air</span>
+                    <span class="stat-label">Trap Status</span>
+                </div>
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between;">
+                        <span class="val-big" id="tank-val">0%</span>
+                    </div>
+                    <div class="progress-container"><div class="progress-bar" id="tank-bar"></div></div>
+                    <span class="stat-label">Storage Level</span>
+                </div>
+                <div class="card">
+                    <span class="val-big" id="pump-display">Standby</span>
+                    <span class="stat-label">Pump Status</span>
+                </div>
+            </div>
+
+            <div class="visual-grid">
+                <div class="card">
+                    <h4 style="margin:0 0 10px 0;">Temperature Trend</h4>
+                    <div style="height: 180px;"><canvas id="tempChart"></canvas></div>
+                </div>
+                <div class="card">
+                    <h4 style="margin:0 0 10px 0;">Control</h4>
+                    <div class="btn-group">
+                        <button id="on-btn" class="btn btn-on" onclick="sendCmd('1')" disabled>START PUMP</button>
+                        <button id="off-btn" class="btn btn-off" onclick="sendCmd('0')" disabled>STOP PUMP</button>
+                    </div>
+                    <p id="lock-notice" style="color:var(--danger);font-size:12px;margin-top:10px;text-align:center;min-height:18px;font-weight:bold;"></p>
+                </div>
+            </div>
+        </div>
+
+        <div id="history" class="tab-content">
+            <h2 style="margin-top:0;">History</h2>
+            <div class="card table-wrapper">
+                <table>
+                    <thead><tr><th>Time</th><th>Event</th><th>Temp</th></tr></thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="settings" class="tab-content">
+            <h2 style="margin-top:0;">Settings</h2>
+            <div class="card" style="max-width:400px; display:flex; justify-content:space-between; align-items:center;">
+                <span>Dark Mode</span>
+                <label class="switch">
+                    <input type="checkbox" id="theme-toggle" onclick="toggleTheme()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- ส่วนตั้งค่า (ใช้ค่าเดิม) ---
+        const firebaseConfig = { apiKey: "AIzaSyAes8uvjRS5yjDzUhnqM8poHcXm-i0D3Nk", databaseURL: "https://grease-trap-history-default-rtdb.asia-southeast1.firebasedatabase.app" }; 
+        const TANK_HEIGHT_CM = 10.4; 
+        
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt');
+        
+        let currentTemp = 0, greaseCode = 0, pumpState = false, lastPumpState = -1;
+        let tankDistance = 10.4; 
+
+        // Chart
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const tempData = [], tempLabels = [];
+        const tempChart = new Chart(tempCtx, { 
+            type: 'line', 
+            data: { 
+                labels: tempLabels, 
+                datasets: [{ 
+                    data: tempData, borderColor: '#6f42c1', tension: 0.4, fill: true, backgroundColor: 'rgba(111, 66, 193, 0.05)', pointRadius: 0
+                }] 
+            }, 
+            options: { 
+                responsive: true, maintainAspectRatio: false,
+                scales: { x: { display: false }, y: { min: 10, max: 45 } },
+                plugins: { legend: { display: false } } 
+            }
+        });
+
+        client.on('connect', () => { 
+            client.subscribe(['myiot/temp', 'myiot/grease_status', 'myiot/pump_real_status', 'myiot/tank_distance']); 
+        });

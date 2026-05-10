@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grease-Care: Smart Dashboard</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <style>
+        :root { --primary: #6f42c1; --bg: #f8f9fd; --card-bg: #ffffff; --text-main: #333; --text-sub: #888; --border: #eee; --danger: #ff5252; --warning: #ffc107; --success: #28a745; }
+        [data-theme="dark"] { --bg: #121212; --card-bg: #1e1e1e; --text-main: #e0e0e0; --text-sub: #aaa; --border: #333; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; display: flex; height: 100vh; color: var(--text-main); transition: 0.3s; }
+        .sidebar { width: 200px; background: var(--card-bg); border-right: 1px solid var(--border); padding: 20px; display: flex; flex-direction: column; }
+        .logo { color: var(--primary); font-weight: bold; font-size: 22px; margin-bottom: 10px; }
+        
+        .status-box { margin-bottom: 30px; padding: 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .online { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .offline { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+        
+        .menu-item { padding: 12px; border-radius: 8px; color: var(--text-sub); text-decoration: none; margin-bottom: 5px; cursor: pointer; }
+        .menu-item.active { background: var(--primary); color: white; }
+        .main-content { flex: 1; padding: 20px; overflow-y: auto; }
+        .tab-content { display: none; } .tab-content.active { display: block; }
+        
+        .dashboard-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); grid-gap: 15px; margin-bottom: 15px; }
+        .card { background: var(--card-bg); padding: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .stat-card { display: flex; align-items: center; gap: 12px; }
+        .icon-box { width: 45px; height: 45px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .val-big { font-size: 20px; font-weight: bold; display: block; }
+        .btn-group { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; }
+        .btn { padding: 12px; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; transition: 0.3s; }
+        .btn-on { background: var(--primary); color: white; }
+        .btn-off { background: #eee; color: #555; } .btn-off.active { background: var(--danger); color: white; }
+        .btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background: var(--primary); }
+        input:checked + .slider:before { transform: translateX(20px); }
+        table { width: 100%; border-collapse: collapse; } th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--border); }
+        
+        .progress-container { width: 100%; background: #eee; border-radius: 10px; height: 10px; margin-top: 5px; overflow: hidden; }
+        .progress-bar { height: 100%; background: var(--success); width: 0%; transition: width 0.5s; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo">✦ Grease-care</div>
+        
+        <div class="status-box">
+            <div style="display: flex; align-items: center; margin-bottom: 4px;">
+                <span id="board-dot" class="status-dot offline"></span>
+                <span id="board-text" style="font-size: 13px; font-weight: bold; color: var(--text-main);">Board: Offline</span>
+            </div>
+            <div id="last-seen" style="font-size: 10px; color: var(--text-sub);">Last seen: --</div>
+        </div>
+
+        <div class="menu-item active" onclick="showTab('overview', this)">Overview</div>
+        <div class="menu-item" onclick="showTab('history', this)">History</div>
+        <div class="menu-item" onclick="showTab('settings', this)">Settings</div>
+    </div>
+    <div class="main-content">
+        <div id="overview" class="tab-content active">
+            <h1>Overview</h1>
+            <div class="dashboard-grid">
+                <div class="card stat-card"><div class="icon-box" style="background: #f3ebff; color: #6f42c1;">🌡️</div><div><span class="val-big" id="temp-val">-- °C</span><span style="font-size:12px;color:var(--text-sub)">Temp Main</span></div></div>
+                <div class="card stat-card"><div class="icon-box" style="background: #ffebee; color: #f44336;">🌡️</div><div><span class="val-big" id="temp2-val">-- °C</span><span style="font-size:12px;color:var(--text-sub)">Temp Storage</span></div></div>
+                <div class="card stat-card"><div class="icon-box" id="status-icon" style="background: #f1f3f5;">☁️</div><div><span class="val-big" id="status-text">Air</span><span style="font-size:12px;color:var(--text-sub)">Trap Status</span></div></div>
+                <div class="card stat-card">
+                    <div class="icon-box" id="tank-icon" style="background: #e3f2fd; color: #2196f3;">🛢️</div>
+                    <div style="width: 100%;">
+                        <div style="display:flex; justify-content:space-between;">
+                            <span class="val-big" id="tank-val">0%</span>
+                            <span style="font-size:12px;color:var(--text-sub)">Storage Level</span>
+                        </div>
+                        <div class="progress-container"><div class="progress-bar" id="tank-bar"></div></div>
+                    </div>
+                </div>
+                <div class="card stat-card"><div class="icon-box" style="background: #fff4e5; color: #ff9800;">⚙️</div><div><span class="val-big" id="pump-display">Standby</span><span style="font-size:12px;color:var(--text-sub)">Main Pump</span></div></div>
+                <div class="card stat-card"><div class="icon-box" style="background: #e8f5e9; color: #4caf50;">🔄</div><div><span class="val-big" id="motor-display">Standby</span><span style="font-size:12px;color:var(--text-sub)">Mixer Motor</span></div></div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1.3fr 1fr; grid-gap: 15px;">
+                <div class="card" style="height:250px; display:flex; flex-direction:column;">
+                    <h3 style="font-size:14px;margin:0 0 10px 0;">Temp Trend (Main vs Storage)</h3>
+                    <div style="flex:1; position:relative; width:100%;">
+                        <canvas id="tempChart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3 style="margin-top:0; color:var(--primary);">Main Pump Control</h3>
+                    <div class="btn-group">
+                        <button id="on-btn" class="btn btn-on" onclick="sendCmd('1')" disabled>START PUMP</button>
+                        <button id="off-btn" class="btn btn-off" onclick="sendCmd('0')" disabled>STOP PUMP</button>
+                    </div>
+                    <p id="lock-notice" style="color:var(--danger);font-size:11px;margin-top:10px;"></p>
+
+                    <hr style="border:0; border-top:1px solid var(--border); margin:20px 0;">
+
+                    <h3 style="margin-top:0; color:#2196f3;">Mixer System</h3>
+                    <div class="btn-group">
+                        <div style="display:flex; gap:10px;">
+                            <button id="motor-on-btn" class="btn btn-on" style="flex:1; background:#4caf50;" onclick="sendMotorCmd('1')">START MOTOR</button>
+                            <button id="motor-off-btn" class="btn btn-off" style="flex:1;" onclick="sendMotorCmd('0')" disabled>STOP MOTOR</button>
+                        </div>
+                        <button id="mix-pump-btn" class="btn" style="background:#2196f3; color:white; margin-top:5px;" onclick="sendMixPumpCmd()">ADD GREASE (5s)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="history" class="tab-content"><h1>History</h1><div class="card"><table><thead><tr><th>Time</th><th>Event</th><th>Temp (Main/Storage)</th></tr></thead><tbody id="history-body"></tbody></table></div></div>
+        <div id="settings" class="tab-content"><h1>Settings</h1><div class="card" style="max-width:400px;"><div style="display:flex;justify-content:space-between;align-items:center;"><span>Dark Mode</span><label class="switch"><input type="checkbox" id="theme-toggle" onclick="toggleTheme()"><span class="slider"></span></label></div></div></div>
+    </div>
+
+    <script>
+        const firebaseConfig = { apiKey: "AIzaSyDFqx54O85izHkvdeff0WRsEhQX-B601Ag", databaseURL: "https://grease-trap2-default-rtdb.asia-southeast1.firebasedatabase.app" }; 
+        const TANK_HEIGHT_CM = 10.4; 
+
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt'); 
+        
+        let currentTemp = 0, currentTemp2 = 0; // [ใหม่] เพิ่มตัวแปร temp2
+        let greaseCode = 0, pumpState = false, lastPumpState = -1;
+        let tankDistance = 10.4; 
+        let motorState = false, mixPumpState = false;
+        let lastSeenTimestamp = 0; 
+
+        const tempCtx = document.getElementById('tempChart').getContext('2d');
+        const tempLabels = [];
+        const tempData = [];    // ข้อมูล Temp Main
+        const temp2Data = [];   // [ใหม่] ข้อมูล Temp Storage
+        
+        // [ใหม่] อัปเดต Chart ให้รองรับ 2 เส้น
+        const tempChart = new Chart(tempCtx, { 
+            type: 'line', 
+            data: { 
+                labels: tempLabels, 
+                datasets: [
+                    { 
+                        label: 'Main', data: tempData, 
+                        borderColor: '#6f42c1', tension: 0.4, fill: false
+                    },
+                    { 
+                        label: 'Storage', data: temp2Data, 
+                        borderColor: '#f44336', tension: 0.4, fill: false 
+                    }
+                ] 
+            }, 
+            options: { 
+                responsive: true, maintainAspectRatio: false, 
+                scales: { x: { display: false }, y: { min: 0, max: 80 } }, // ปรับแกน Y เป็น 80 เพราะ PID เลี้ยงไขมันไว้ที่เกือบ 60 องศา
+                plugins: { legend: { display: true } } // เปิดคำอธิบายกราฟ
+            } 
+        });
+
+        client.on('connect', () => { 
+            client.subscribe('myiot/temp'); 
+            client.subscribe('myiot/temp2'); // [ใหม่] รับค่า temp ตัวที่ 2
+            client.subscribe('myiot/grease_status'); 
+            client.subscribe('myiot/pump_real_status');
+            client.subscribe('myiot/tank_distance'); 
+            client.subscribe('myiot/motor_status');
+            client.subscribe('myiot/mix_pump_status');
+            client.subscribe('myiot/board_status');
+        });
+
+        client.on('message', (topic, message) => {
+            const data = message.toString();
+            lastSeenTimestamp = Date.now();
+
+            if (topic === 'myiot/board_status') { updateBoardConnectionUI(data); }
+            
+            // อัปเดต Temp Main (สีม่วง)
+            if (topic === 'myiot/temp') { 
+                currentTemp = data; 
+                document.getElementById('temp-val').innerText = data + " °C"; 
+                
+                if (tempLabels.length > 15) { tempLabels.shift(); tempData.shift(); temp2Data.shift(); } 
+                tempLabels.push(new Date().toLocaleTimeString()); 
+                tempData.push(currentTemp);
+                temp2Data.push(currentTemp2); // จับคู่ temp2 ไปพร้อมกันเลย
+                tempChart.update(); 
+            }
+            
+            // [ใหม่] อัปเดต Temp Storage (สีแดง)
+            if (topic === 'myiot/temp2') {
+                currentTemp2 = data;
+                document.getElementById('temp2-val').innerText = data + " °C";
+                // วาดกราฟล่าสุดทับลงไป
+                if (temp2Data.length > 0) {
+                    temp2Data[temp2Data.length - 1] = currentTemp2;
+                    tempChart.update();
+                }
+            }
+
+            if (topic === 'myiot/grease_status') { greaseCode = parseInt(data); updateUI(); }
+            if (topic === 'myiot/tank_distance') { tankDistance = parseFloat(data); updateUI(); }
+            if (topic === 'myiot/pump_real_status') { 
+                pumpState = (data === "1"); 
+                updateUI(); 
+                if(pumpState !== lastPumpState) { 
+                    // [แก้ไข] ประวัติการทำงานจะบันทึกอุณหภูมิ 2 ตัวพร้อมกัน
+                    database.ref('logs').push({ time: new Date().toLocaleString('th-TH'), event: pumpState ? "Main Pump Started" : "Main Pump Stopped", temp: currentTemp, temp2: currentTemp2 }); 
+                    lastPumpState = pumpState; 
+                } 
+            }
+            if (topic === 'myiot/motor_status') { motorState = (data === "1"); updateMixerUI(); }
+            if (topic === 'myiot/mix_pump_status') { mixPumpState = (data === "1"); updateMixerUI(); }
+        });
+
+        function updateBoardConnectionUI(status) {
+            const dot = document.getElementById('board-dot');
+            const text = document.getElementById('board-text');
+            if (status === 'online') { dot.className = "status-dot online"; text.innerText = "Board: Online"; } 
+            else { dot.className = "status-dot offline"; text.innerText = "Board: Offline"; }
+        }
+
+        setInterval(() => {
+            if (lastSeenTimestamp === 0) return; 
+            const diffSeconds = Math.floor((Date.now() - lastSeenTimestamp) / 1000);
+            document.getElementById('last-seen').innerText = `Last seen: ${diffSeconds}s ago`;
+            if (diffSeconds > 15) { updateBoardConnectionUI('offline'); } 
+            else { updateBoardConnectionUI('online'); }
+        }, 2000);
+
+        function updateUI() {
+            let tankPercent = ((TANK_HEIGHT_CM - tankDistance) / TANK_HEIGHT_CM) * 100;
+            tankPercent = Math.max(0, Math.min(100, tankPercent)); 
+            const tankVal = document.getElementById('tank-val');
+            const tankBar = document.getElementById('tank-bar');
+            tankVal.innerText = Math.round(tankPercent) + "%";
+            tankBar.style.width = tankPercent + "%";
+            let isTankFull = (tankPercent > 90); 
+            if (isTankFull) tankBar.style.backgroundColor = "var(--danger)";
+            else if (tankPercent > 70) tankBar.style.backgroundColor = "var(--warning)";
+            else tankBar.style.backgroundColor = "var(--success)";
+
+            const onBtn = document.getElementById('on-btn'), offBtn = document.getElementById('off-btn');
+            const statusText = document.getElementById('status-text'), statusIcon = document.getElementById('status-icon'), notice = document.getElementById('lock-notice');
+            onBtn.disabled = !(greaseCode === 1 && !pumpState && !isTankFull);
+            offBtn.disabled = !pumpState;
+            if(pumpState) offBtn.classList.add('active'); else offBtn.classList.remove('active');
+            document.getElementById('pump-display').innerText = pumpState ? "Working" : "Standby";
+            notice.style.display = "block";
+            if (pumpState) { notice.style.display = "none"; }
+            else if (isTankFull) { notice.innerText = "⛔ Locked: Storage Tank FULL!"; }
+            else if (greaseCode === 0) { statusText.innerText = "Air"; statusIcon.innerText = "☁️"; statusIcon.style.background = "#f1f3f5"; notice.innerText = "⚠️ Locked: Air detected"; } 
+            else if (greaseCode === 1) { statusText.innerText = "Grease Detected"; statusIcon.innerText = "🛢️"; statusIcon.style.background = "#f3ebff"; notice.style.display = "none"; } 
+            else if (greaseCode === 2) { statusText.innerText = "Water"; statusIcon.innerText = "💧"; statusIcon.style.background = "#e7f3ff"; notice.innerText = "⚠️ Locked: Water detected"; }
+        }
+
+        function updateMixerUI() {
+            const mOnBtn = document.getElementById('motor-on-btn'), mOffBtn = document.getElementById('motor-off-btn'), mDisplay = document.getElementById('motor-display');
+            mOnBtn.disabled = motorState; mOffBtn.disabled = !motorState;
+            if (motorState) { mOffBtn.classList.add('active'); mDisplay.innerText = "Spinning"; } 
+            else { mOffBtn.classList.remove('active'); mDisplay.innerText = "Standby"; }
+            const mixBtn = document.getElementById('mix-pump-btn');
+            if (mixPumpState) { mixBtn.innerText = "⏳ Processing..."; mixBtn.disabled = true; mixBtn.style.background = "#aaa"; } 
+            else { mixBtn.innerText = "ADD GREASE (5s)"; mixBtn.disabled = false; mixBtn.style.background = "#2196f3"; }
+        }
+
+        database.ref('logs').limitToLast(10).on('value', snap => { 
+            let html = ""; const d = snap.val(); 
+            if(d) Object.keys(d).reverse().forEach(k => html += `<tr><td>${d[k].time}</td><td>${d[k].event}</td><td>${d[k].temp}°C / ${d[k].temp2 || '--'}°C</td></tr>`); 
+            document.getElementById('history-body').innerHTML = html; 
+        });
+        function showTab(id, el) { document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active')); document.querySelectorAll('.menu-item').forEach(m => m.classList.remove('active')); document.getElementById(id).classList.add('active'); el.classList.add('active'); }
+        function toggleTheme() { document.body.setAttribute('data-theme', document.getElementById('theme-toggle').checked ? 'dark' : 'light'); }
+        function sendCmd(v) { client.publish('myiot/control', v); }
+        function sendMotorCmd(v) { client.publish('myiot/control_motor', v); }
+        function sendMixPumpCmd() { client.publish('myiot/control_mix_pump', '1'); }
+    </script>
+</body>
+</html>
